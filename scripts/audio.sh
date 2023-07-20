@@ -1,0 +1,1 @@
+ffmpeg -i transpose_crop_MVI_0036_003/EMOCA_v2_lr_mse_20/video_geometry_detail_with_sound.mp4 -ar 16000 transpose_crop_MVI_0036_003/transpose_crop_MVI_0036_003.wav

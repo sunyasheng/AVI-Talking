@@ -1,0 +1,51 @@
+[submodule "external/emonet"]
+	path = external/emonet
+	url = https://github.com/radekd91/emonet.git
+	branch = feature/exposeEemotionFeature
+[submodule "external/SwinTransformer"]
+	path = external/SwinTransformer
+	url = https://github.com/radekd91/Swin-Transformer.git
+	branch = feature/emoca
+[submodule "external/Deep3DFaceRecon_pytorch"]
+	path = external/Deep3DFaceRecon_pytorch
+	url = https://github.com/radekd91/Deep3DFaceRecon_pytorch.git
+	branch = master
+[submodule "external/TDDFA_V2"]
+	path = external/TDDFA_V2
+	url = https://github.com/radekd91/3DDFA_V2.git
+	branch = master
+[submodule "external/face-parsing.PyTorch"]
+	path = external/face-parsing.PyTorch
+	url = https://github.com/zllrunning/face-parsing.PyTorch
+
+[submodule "external/3FabRec"]
+	path = external/3FabRec
+	url = https://github.com/browatbn2/3FabRec/
+[submodule "external/KAIR"]
+	path = external/KAIR
+	url = https://github.com/cszn/KAIR/
+[submodule "external/GPEN"]
+	path = external/GPEN
+	url = https://github.com/yangxy/GPEN
+[submodule "external/av_hubert"]
+	path = external/av_hubert
+	url = https://github.com/facebookresearch/av_hubert
+[submodule "external/spectre"]
+	path = external/spectre
+	url = https://github.com/radekd91/spectre
+	branch = feature/batchVidSupport
+[submodule "external/FOCUS"]
+	path = external/FOCUS
+	url = https://github.com/radekd91/Occlusion-Robust-MoFA
+	branch = feature/integration
+
+# private repos
+[submodule "inferno/sandbox/infernal"]
+	path = inferno/sandbox/infernal
+	url = git@gitlab.com:rdanecek/infernal_sandbox.git
+	branch = master
+
+[submodule "inferno_apps/sandbox_apps/infernal"]
+	path = inferno_apps/sandbox_apps/infernal
+	url = git@gitlab.com:rdanecek/infernal_apps.git
+	branch = master

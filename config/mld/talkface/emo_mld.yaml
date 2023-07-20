@@ -1,0 +1,4 @@
+load_talkclip_dataset: 1
+seq_length: 50
+vertice_dim: 59
+dataset_names: 'Mead_M,Mead_W'

@@ -1,0 +1,4 @@
+load_talkclip_dataset: 0
+seq_length: 75
+vertice_dim: 59
+dataset_names: 'head_dynamics'

@@ -1,0 +1,252 @@
+import os
+import torch
+import numpy as np
+import pickle
+from tqdm import tqdm
+from transformers import Wav2Vec2Processor
+import librosa
+from collections import defaultdict
+from torch.utils import data
+from os.path import join as pjoin
+from torchvision import transforms
+
+
+class TalkDataset(data.Dataset):
+    """Custom data.Dataset compatible with data.DataLoader."""
+    def __init__(self, data,subjects_dict,data_type="train",read_audio=False):
+        self.data = data
+        self.len = len(self.data)
+        self.subjects_dict = subjects_dict
+        self.data_type = data_type
+        self.one_hot_labels = np.eye(len(subjects_dict["train"]))
+        self.read_audio = read_audio
+        self.coeff_std = np.load('misc/coeff_std.npy')
+        self.coeff_mean = np.load('misc/coeff_mean.npy')
+
+        self.transform = transforms.Compose(
+            [
+                transforms.ToTensor(),
+                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5), inplace=True),
+            ])
+
+    def get_by_frame(self, frame_idxes, coeff, audio=None, sr=16000//25):
+        res_coeff = []
+        res_coeff_pre = []
+        res_audio = [] if audio is not None else None
+        for frame_idx in frame_idxes:
+            res_coeff.append(coeff[frame_idx])
+            res_coeff_pre.append(coeff[frame_idx-2:frame_idx])
+            if audio is not None:
+                start_frame = frame_idx - 2
+                end_frame = frame_idx + 3
+                start_frame_audio, end_frame_audio = start_frame*sr, end_frame*sr + 80 # hard coded + 80 for wav2vec feature extractor
+                res_audio.append(audio[start_frame_audio:end_frame_audio])
+
+        res_coeff = np.stack(res_coeff)
+        res_coeff_pre = np.stack(res_coeff_pre)
+        res_audio = np.stack(res_audio)
+        return res_coeff, res_coeff_pre, res_audio
+
+    def get_frame_idxes(self, tot_cnt, frame_cnt):
+        target_frame_idxes = np.random.choice(list(range(3,tot_cnt-3)), frame_cnt)
+        return target_frame_idxes
+
+    def __getitem__(self, index):
+        """Returns one data pair (source and target)."""
+        # seq_len, fea_dim
+        file_name = self.data[index]["name"]
+        audio_full = self.data[index]["audio"]
+        coeff_full = self.data[index]["coeff"]
+        pose_full = self.data[index]["pose"]
+        shape_full = self.data[index]["shape"]
+        cam_full = self.data[index]["cam"]
+        # vertice = self.data[index]["vertice"]
+        # template = self.data[index]["template"]
+
+        offset = 5
+        coeff = coeff_full[offset: -offset]
+        pose = pose_full[offset: -offset]
+        shape = shape_full[offset: -offset]
+        audio = audio_full[offset*640: -offset*640]
+        cam = cam_full[offset: -offset]
+
+        # seq_length = 600
+        seq_length = 200
+        start_idx = np.random.randint(low=0, high=len(coeff)-seq_length)
+        coeff = coeff[start_idx:start_idx+seq_length]
+        pose = pose[start_idx:start_idx+seq_length]
+        shape = shape[start_idx:start_idx+seq_length]
+        cam = cam[start_idx:start_idx+seq_length]
+        audio = audio[start_idx*640:(start_idx+seq_length)*640+80]
+
+        ## normalize
+        # print(np.mean(coeff, axis=0), np.std(coeff, axis=0))
+        coeff = (coeff - self.coeff_mean[np.newaxis,:]) / self.coeff_std[np.newaxis,:]
+        # print(np.mean(coeff, axis=0), np.std(coeff, axis=0))
+        # import pdb;pdb.set_trace()
+        # frame_cnt = 5
+        # target_frame_idxes = self.get_frame_idxes(len(coeff), frame_cnt=frame_cnt)
+
+        # coeff, coeff_pre, audio = self.get_by_frame(target_frame_idxes, coeff, audio=audio)
+        # import pdb;pdb.set_trace()
+        return torch.FloatTensor(audio),torch.FloatTensor(coeff),torch.FloatTensor(pose),torch.FloatTensor(shape),torch.FloatTensor(cam),file_name
+
+        # if self.read_audio:
+        #     coeff, coeff_pre, audio = self.get_by_frame(target_frame_idxes, coeff, audio=audio)
+        #     # import pdb;pdb.set_trace()
+        #     return torch.FloatTensor(audio),torch.FloatTensor(coeff),torch.FloatTensor(coeff_pre), file_name
+        # else:
+        #     coeff, coeff_pre, _ = self.get_by_frame(target_frame_idxes, coeff, audio=None)
+        #     return torch.FloatTensor(coeff),torch.FloatTensor(coeff_pre), file_name
+
+    def __len__(self):
+        return self.len
+
+
+def read_exp(motion_deca_dir, name):
+    # import pdb; pdb.set_trace()
+    frames_meta_path = pjoin(motion_deca_dir, name, 'EMOCA_v2_lr_mse_20')
+    # date_folders = [pjoin(date_dir, nm) for nm in os.listdir(date_dir)]
+    # sorted_file_names = sorted(date_folders, key=lambda x: os.path.getmtime(x))
+    # latest_file_name = sorted_file_names[-1]
+    # frames_meta_path = pjoin(latest_file_name, name, 'results/EMOCA_v2_lr_mse_20')
+    exp_meta_paths = [pjoin(frames_meta_path, name, 'exp.npy') for name in os.listdir(frames_meta_path) if
+                      os.path.isdir(os.path.join(frames_meta_path, name)) and 'processed' not in name]
+    exp_meta_paths = sorted(exp_meta_paths)
+    # import pdb; pdb.set_trace()
+    pose_meta_paths = [p.replace('exp.npy', 'pose.npy') for p in exp_meta_paths]
+    shape_meta_paths = [p.replace('exp.npy', 'shape.npy') for p in exp_meta_paths]
+    cam_meta_paths = [p.replace('exp.npy', 'cam.npy') for p in exp_meta_paths]
+    # import pdb; pdb.set_trace()
+    exp_meta = [np.load(p) for p in exp_meta_paths]
+    exp_meta = np.stack(exp_meta)
+
+    pose_meta = [np.load(p) for p in pose_meta_paths]
+    pose_meta = np.stack(pose_meta)
+
+    shape_meta = [np.load(p) for p in shape_meta_paths]
+    shape_meta = np.stack(shape_meta)
+
+    cam_meta = [np.load(p) for p in cam_meta_paths]
+    cam_meta = np.stack(cam_meta)
+    return exp_meta, pose_meta, shape_meta, cam_meta
+
+
+def read_data(args):
+    print("Loading data...")
+    data = defaultdict(dict)
+
+    if args.read_audio: # read_audio==False when training vq to save time
+        processor = Wav2Vec2Processor.from_pretrained(args.wav2vec2model_path)
+
+    train_data = []
+    valid_data = []
+    test_data = []
+
+    # import pdb; pdb.set_trace()
+
+    folder_names = os.listdir(args.data_root)
+    folder_names = [fn for fn in folder_names if os.path.isdir(os.path.join(args.data_root,fn))]
+    for folder_name in folder_names:
+        if args.read_audio:
+            wav_path = os.path.join(args.data_root, folder_name, folder_name+'.wav')
+            speech_array, sampling_rate = librosa.load(wav_path, sr=16000)
+            input_values = np.squeeze(processor(speech_array, sampling_rate=16000).input_values)
+        key = folder_name
+        if len(input_values) <= 16000//25 * (600+6): continue
+        data[key]["audio"] = input_values if args.read_audio else None
+        data[key]["exp"], data[key]["pose"], data[key]["shape"], data[key]["cam"] = read_exp(args.data_root, folder_name)
+        data[key]["coeff"] = np.concatenate([data[key]["exp"],data[key]["pose"][:,3:]], axis=1)
+        data[key]["name"] = folder_name
+        if args.w_fan is True:
+            print('args with fan: ', args.w_fan)
+        import pdb; pdb.set_trace()
+
+
+    subjects_dict = {}
+    subjects_dict["train"] = ['transpose_crop_MVI_0013_003',
+                                'transpose_crop_MVI_0013_001',
+                                'transpose_crop_MVI_0013_000',
+                                'transpose_crop_MVI_0013_002',
+                                'transpose_crop_MVI_0014_000',
+                                'transpose_crop_MVI_0013_004',
+                                'transpose_crop_MVI_0013_005',
+                                'transpose_crop_MVI_0017_000',
+                                'transpose_crop_MVI_0014_001',
+                                'transpose_crop_MVI_0014_004',
+                                'transpose_crop_MVI_0014_003',
+                                'transpose_crop_MVI_0014_002',
+                                'transpose_crop_MVI_0017_002',
+                                'transpose_crop_MVI_0018_001',
+                                'transpose_crop_MVI_0018_002',
+                                'transpose_crop_MVI_0017_004',
+                                'transpose_crop_MVI_0018_005',
+                                'transpose_crop_MVI_0017_003',
+                                'transpose_crop_MVI_0017_001',
+                                'transpose_crop_MVI_0018_003',
+                                'transpose_crop_MVI_0018_004',
+                                'transpose_crop_MVI_0018_000',
+                                'transpose_crop_MVI_0022_000',
+                                'transpose_crop_MVI_0025_001',
+                                'transpose_crop_MVI_0023_000',
+                                'transpose_crop_MVI_0023_003',
+                                'transpose_crop_MVI_0023_001',
+                                'transpose_crop_MVI_0023_002',
+                                'transpose_crop_MVI_0025_000',
+                                'transpose_crop_MVI_0025_003',
+                                'transpose_crop_MVI_0025_002',
+                                'transpose_crop_MVI_0027_000',
+                                'transpose_crop_MVI_0027_001',
+                                'transpose_crop_MVI_0027_002',
+                                'transpose_crop_MVI_0027_003',
+                                'transpose_crop_MVI_0027_004',
+                                'transpose_crop_MVI_0027_005',
+                                'transpose_crop_MVI_0030_000',
+                                'transpose_crop_MVI_0030_001',
+                                'transpose_crop_MVI_0031_000',
+                                'transpose_crop_MVI_0031_002',
+                                'transpose_crop_MVI_0031_001',
+                                'transpose_crop_MVI_0036_000',
+                                'transpose_crop_MVI_0036_001',
+                                'transpose_crop_MVI_0036_002']
+
+    subjects_dict["val"] = ['transpose_crop_MVI_0030_002',
+                            'transpose_crop_MVI_0036_003']
+    subjects_dict["test"] = ['transpose_crop_MVI_0030_002',
+                             'transpose_crop_MVI_0036_003']
+
+    for k, v in data.items():
+        subject_id = k
+        if subject_id in subjects_dict["train"]:
+            train_data.append(v)
+        if subject_id in subjects_dict["val"]:
+            valid_data.append(v)
+        if subject_id in subjects_dict["test"]:
+            test_data.append(v)
+
+    print('Loaded data: Train-{}, Val-{}, Test-{}'.format(len(train_data), len(valid_data), len(test_data)))
+    return train_data, valid_data, test_data, subjects_dict
+
+
+def get_dataloaders(args):
+    dataset = {}
+    train_data, valid_data, test_data, subjects_dict = read_data(args)
+    train_data = TalkDataset(train_data,subjects_dict,"train",args.read_audio)
+    dataset["train"] = data.DataLoader(dataset=train_data, batch_size=args.batch_size, shuffle=True, num_workers=args.workers)
+    valid_data = TalkDataset(valid_data,subjects_dict,"val",args.read_audio)
+    dataset["valid"] = data.DataLoader(dataset=valid_data, batch_size=1, shuffle=False, num_workers=args.workers)
+    test_data = TalkDataset(test_data,subjects_dict,"test",args.read_audio)
+    dataset["test"] = data.DataLoader(dataset=test_data, batch_size=1, shuffle=False, num_workers=args.workers)
+    return dataset
+
+
+if __name__ == "__main__":
+    from easydict import EasyDict
+    args = EasyDict()
+    args.data_root = '/data/yashengsun/local_storage/paishe/paise'
+    args.wav2vec2model_path = 'facebook/wav2vec2-base-960h'
+    args.batch_size = 1
+    args.workers = 0
+    args.read_audio = True
+    dataset_dict = get_dataloaders(args)
+    print(dataset_dict['test'].dataset[0])
